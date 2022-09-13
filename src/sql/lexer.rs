@@ -1,10 +1,11 @@
 use std::array::IntoIter;
 
 use regex::Regex;
-use rsdb::string;
+
+use super::{err::SyntaxError, parser::NamedInstance};
 
 /// The lexers of SQL
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Lexer {
     SELECT(String),
     FROM(String),
@@ -12,29 +13,6 @@ pub enum Lexer {
     COMMA(String),
     WHITESPACE(String),
     ID(String),
-}
-
-impl Clone for Lexer {
-    /// Returns a copy of the value.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # #![allow(noop_method_call)]
-    /// let select = Lexer::SELECT("SELECT"); // Lexer implements Clone
-    ///
-    /// assert_eq!(select, select.clone());
-    /// ```
-    fn clone(&self) -> Self {
-        match self {
-            Self::SELECT(value) => Self::SELECT(value.clone()),
-            Self::FROM(value) => Self::FROM(value.clone()),
-            Self::STAR(value) => Self::STAR(value.clone()),
-            Self::COMMA(value) => Self::COMMA(value.clone()),
-            Self::WHITESPACE(value) => Self::WHITESPACE(value.clone()),
-            Self::ID(value) => Self::ID(value.clone()),
-        }
-    }
 }
 
 impl From<Lexer> for Regex {
@@ -53,8 +31,7 @@ impl From<Lexer> for Regex {
 }
 
 impl PartialEq for Lexer {
-    /// This method tests for `self` and `other` values to be equal, and is used
-    /// by `==`.
+    /// This method tests for `self` and `other` values to be equal, and is used by `==`.
     fn eq(&self, other: &Self) -> bool {
         match self {
             Self::SELECT(_) => matches!(other, Self::SELECT(_)),
@@ -69,14 +46,27 @@ impl PartialEq for Lexer {
 
 impl Eq for Lexer {}
 
+impl NamedInstance for Lexer {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::SELECT(_) => "SELECT",
+            Self::FROM(_) => "FROM",
+            Self::STAR(_) => "STAR",
+            Self::COMMA(_) => "COMMA",
+            Self::WHITESPACE(_) => "WHITESPACE",
+            Self::ID(_) => "ID",
+        }
+    }
+}
+
 impl Lexer {
     const VALUES: [Self; 6] = [
-        Self::SELECT(string!()),
-        Self::FROM(string!()),
-        Self::STAR(string!()),
-        Self::COMMA(string!()),
-        Self::WHITESPACE(string!()),
-        Self::ID(string!()),
+        Self::SELECT(String::new()),
+        Self::FROM(String::new()),
+        Self::STAR(String::new()),
+        Self::COMMA(String::new()),
+        Self::WHITESPACE(String::new()),
+        Self::ID(String::new()),
     ];
 
     /// Creates a consuming iterator, that is, one that moves each value out of
@@ -91,11 +81,26 @@ impl Lexer {
         Self::VALUES.into_iter()
     }
 
-    fn is_ignore_value(&self) -> bool {
+    pub fn is(&self, other: &Self) -> bool {
+        match self {
+            Self::SELECT(_) => matches!(other, Self::SELECT(_)),
+            Self::FROM(_) => matches!(other, Self::FROM(_)),
+            Self::STAR(_) => matches!(other, Self::STAR(_)),
+            Self::COMMA(_) => matches!(other, Self::COMMA(_)),
+            Self::WHITESPACE(_) => matches!(other, Self::WHITESPACE(_)),
+            Self::ID(_) => matches!(other, Self::ID(_)),
+        }
+    }
+
+    fn is_value_ignores(&self) -> bool {
         matches!(
             self,
             Self::SELECT(_) | Self::FROM(_) | Self::STAR(_) | Self::COMMA(_) | Self::WHITESPACE(_)
         )
+    }
+
+    pub fn is_clause(&self) -> bool {
+        matches!(self, Self::SELECT(_) | Self::FROM(_))
     }
 
     pub fn value(&self) -> &str {
@@ -145,14 +150,7 @@ impl Lexer {
     /// Returns the start and end byte range of the leftmost-first match in
     /// `text`. If no match exists, then `None` is returned.
     ///
-    /// Note that this should only be used if you want to discover the position
-    /// of the match. Testing the existence of a match is faster if you use
-    /// `is_match`.
-    ///
     /// # Example
-    ///
-    /// Find the start and end location of the first word with exactly 13
-    /// Unicode word characters:
     ///
     /// ```rust
     /// # fn main() {
@@ -163,11 +161,23 @@ impl Lexer {
     /// ```
     fn find(&self, expr: &str) -> Option<Self> {
         match Regex::from(self.clone()).find(expr) {
-            Some(m) => Some(self.replace(string!(m.as_str()))),
+            Some(m) => Some(self.replace(String::from(m.as_str()))),
             None => None,
         }
     }
 
+    /// Returns the start and end byte range of the leftmost-first match in
+    /// `text`. If no match exists, then `None` is returned.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// # fn main() {
+    /// let text = "SELECT * FROM table";
+    /// let mat = Lexer::find_one(text);
+    /// assert_matches!(mat, Lexer::SELECT(_));
+    /// # }
+    /// ```
     fn find_one(expr: &str) -> Option<Self> {
         Self::into_iter()
             .map_while(|lexer| Some(lexer.find(expr)))
@@ -178,7 +188,7 @@ impl Lexer {
                             Some(curr_lexer)
                         } else if curr_lexer.len() < prev_lexer.len() {
                             Some(prev_lexer)
-                        } else if curr_lexer.is_ignore_value() {
+                        } else if curr_lexer.is_value_ignores() {
                             Some(curr_lexer)
                         } else {
                             Some(prev_lexer)
@@ -190,7 +200,7 @@ impl Lexer {
             })
     }
 
-    pub fn parse(sql: &str) -> Result<Vec<Self>, &'static str> {
+    pub fn parse(sql: &str) -> Result<Vec<Self>, SyntaxError> {
         let mut lexers: Vec<Self> = vec![];
         let mut i: usize = 0;
 
@@ -203,7 +213,11 @@ impl Lexer {
                         lexers.push(lexer);
                     }
                 }
-                None => return Err("excepted"),
+                None => {
+                    return Err(SyntaxError {
+                        msg: format!("SyntaxError: expected {}", &sql[i..i + 1]),
+                    })
+                }
             }
         }
 
@@ -216,62 +230,26 @@ mod tests {
     use crate::sql::lexer::Lexer;
 
     #[test]
-    fn it_clone() {
-        assert!(matches!(
-            Lexer::SELECT(String::from("272f")).clone(),
-            Lexer::SELECT(value) if value == "272f"
-        ));
-        assert!(matches!(
-            Lexer::FROM(String::from("590f")).clone(),
-            Lexer::FROM(value) if value == "590f"
-        ));
-        assert!(matches!(
-            Lexer::STAR(String::from("45c5")).clone(),
-            Lexer::STAR(value) if value == "45c5"
-        ));
-        assert!(matches!(
-            Lexer::COMMA(String::from("4b51")).clone(),
-            Lexer::COMMA(value) if value == "4b51"
-        ));
-        assert!(matches!(
-            Lexer::WHITESPACE(String::from("8dd5")).clone(),
-            Lexer::WHITESPACE(value) if value == "8dd5"
-        ));
-        assert!(matches!(
-            Lexer::ID(String::from("ea8f")).clone(),
-            Lexer::ID(value) if value == "ea8f"
-        ));
-    }
-
-    #[test]
     fn it_eq() {
         // same value
-        assert!(Lexer::SELECT(String::from("0844"))
-            .eq(&Lexer::SELECT(String::from("0844"))));
-        assert!(Lexer::FROM(String::from("6d74"))
-            .eq(&Lexer::FROM(String::from("6d74"))));
-        assert!(Lexer::STAR(String::from("b55c"))
-            .eq(&Lexer::STAR(String::from("b55c"))));
-        assert!(Lexer::COMMA(String::from("fd3e"))
-            .eq(&Lexer::COMMA(String::from("fd3e"))));
-        assert!(Lexer::WHITESPACE(String::from("1af1"))
-            .eq(&Lexer::WHITESPACE(String::from("1af1"))));
-        assert!(Lexer::ID(String::from("4ec4"))
-            .eq(&Lexer::ID(String::from("4ec4"))));
+        assert!(Lexer::SELECT(String::from("0844")).eq(&Lexer::SELECT(String::from("0844"))));
+        assert!(Lexer::FROM(String::from("6d74")).eq(&Lexer::FROM(String::from("6d74"))));
+        assert!(Lexer::STAR(String::from("b55c")).eq(&Lexer::STAR(String::from("b55c"))));
+        assert!(Lexer::COMMA(String::from("fd3e")).eq(&Lexer::COMMA(String::from("fd3e"))));
+        assert!(
+            Lexer::WHITESPACE(String::from("1af1")).eq(&Lexer::WHITESPACE(String::from("1af1")))
+        );
+        assert!(Lexer::ID(String::from("4ec4")).eq(&Lexer::ID(String::from("4ec4"))));
         // diff value & ignore values
-        assert!(Lexer::SELECT(String::from("8ff6"))
-            .eq(&Lexer::SELECT(String::from("4acc"))));
-        assert!(Lexer::FROM(String::from("ac16"))
-            .eq(&Lexer::FROM(String::from("0a6a"))));
-        assert!(Lexer::STAR(String::from("0bad"))
-            .eq(&Lexer::STAR(String::from("327f"))));
-        assert!(Lexer::COMMA(String::from("a4f0"))
-            .eq(&Lexer::COMMA(String::from("4cfe"))));
-        assert!(Lexer::WHITESPACE(String::from("80e2"))
-            .eq(&Lexer::WHITESPACE(String::from("c2c5"))));
+        assert!(Lexer::SELECT(String::from("8ff6")).eq(&Lexer::SELECT(String::from("4acc"))));
+        assert!(Lexer::FROM(String::from("ac16")).eq(&Lexer::FROM(String::from("0a6a"))));
+        assert!(Lexer::STAR(String::from("0bad")).eq(&Lexer::STAR(String::from("327f"))));
+        assert!(Lexer::COMMA(String::from("a4f0")).eq(&Lexer::COMMA(String::from("4cfe"))));
+        assert!(
+            Lexer::WHITESPACE(String::from("80e2")).eq(&Lexer::WHITESPACE(String::from("c2c5")))
+        );
         // diff value & match values
-        assert!(!Lexer::ID(String::from("7133"))
-            .eq(&Lexer::ID(String::from("5d5e"))));
+        assert!(!Lexer::ID(String::from("7133")).eq(&Lexer::ID(String::from("5d5e"))));
     }
 
     #[test]
@@ -426,7 +404,7 @@ mod tests {
         // err
         assert!(matches!(
             Lexer::parse("select * from _table1"),
-            Err(err) if err == "excepted"
+            Err(err) if err.msg.eq("SyntaxError: expected _")
         ));
     }
 }
