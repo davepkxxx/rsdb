@@ -1,18 +1,20 @@
 use std::array::IntoIter;
 
 use regex::Regex;
+use rsdb::NamedEnum;
 
-use super::{err::SyntaxError, parser::NamedInstance};
+use super::err::SyntaxError;
 
 /// The lexers of SQL
 #[derive(Debug, Clone)]
 pub enum Lexer {
     SELECT(String),
     FROM(String),
+    AS(String),
     STAR(String),
     COMMA(String),
     WHITESPACE(String),
-    ID(String),
+    NAME(String),
 }
 
 impl From<Lexer> for Regex {
@@ -21,10 +23,11 @@ impl From<Lexer> for Regex {
         let re = match lexer {
             Lexer::SELECT(_) => "^(?i)SELECT",
             Lexer::FROM(_) => "^(?i)FROM",
+            Lexer::AS(_) => r"^(?i)AS",
             Lexer::STAR(_) => r"^\*",
             Lexer::COMMA(_) => "^,",
             Lexer::WHITESPACE(_) => r"^[\s]+",
-            Lexer::ID(_) => r"^[A-Za-z][\w]*",
+            Lexer::NAME(_) => r"^[A-Za-z][\w]*",
         };
         Self::new(re).unwrap()
     }
@@ -36,37 +39,40 @@ impl PartialEq for Lexer {
         match self {
             Self::SELECT(_) => matches!(other, Self::SELECT(_)),
             Self::FROM(_) => matches!(other, Self::FROM(_)),
+            Self::AS(_) => matches!(other, Self::AS(_)),
             Self::STAR(_) => matches!(other, Self::STAR(_)),
             Self::COMMA(_) => matches!(other, Self::COMMA(_)),
             Self::WHITESPACE(_) => matches!(other, Self::WHITESPACE(_)),
-            Self::ID(one) => matches!(other, Self::ID(other) if one == other),
+            Self::NAME(one) => matches!(other, Self::NAME(other) if one == other),
         }
     }
 }
 
 impl Eq for Lexer {}
 
-impl NamedInstance for Lexer {
-    fn name(&self) -> &'static str {
+impl NamedEnum for Lexer {
+    fn name(&self) -> &'_ str {
         match self {
             Self::SELECT(_) => "SELECT",
             Self::FROM(_) => "FROM",
+            Self::AS(_) => "AS",
             Self::STAR(_) => "STAR",
             Self::COMMA(_) => "COMMA",
             Self::WHITESPACE(_) => "WHITESPACE",
-            Self::ID(_) => "ID",
+            Self::NAME(_) => "NAME",
         }
     }
 }
 
 impl Lexer {
-    const VALUES: [Self; 6] = [
+    const VALUES: [Self; 7] = [
         Self::SELECT(String::new()),
         Self::FROM(String::new()),
+        Self::AS(String::new()),
         Self::STAR(String::new()),
         Self::COMMA(String::new()),
         Self::WHITESPACE(String::new()),
-        Self::ID(String::new()),
+        Self::NAME(String::new()),
     ];
 
     /// Creates a consuming iterator, that is, one that moves each value out of
@@ -77,7 +83,7 @@ impl Lexer {
     /// 2021 edition -- see the [array] Editions section for more information.
     ///
     /// [array]: prim@array
-    pub fn into_iter() -> IntoIter<Lexer, 6_usize> {
+    pub fn into_iter() -> IntoIter<Lexer, 7> {
         Self::VALUES.into_iter()
     }
 
@@ -85,10 +91,11 @@ impl Lexer {
         match self {
             Self::SELECT(_) => matches!(other, Self::SELECT(_)),
             Self::FROM(_) => matches!(other, Self::FROM(_)),
+            Self::AS(_) => matches!(other, Self::AS(_)),
             Self::STAR(_) => matches!(other, Self::STAR(_)),
             Self::COMMA(_) => matches!(other, Self::COMMA(_)),
             Self::WHITESPACE(_) => matches!(other, Self::WHITESPACE(_)),
-            Self::ID(_) => matches!(other, Self::ID(_)),
+            Self::NAME(_) => matches!(other, Self::NAME(_)),
         }
     }
 
@@ -107,10 +114,11 @@ impl Lexer {
         match self {
             Self::SELECT(value) => value,
             Self::FROM(value) => value,
+            Self::AS(value) => value,
             Self::STAR(value) => value,
             Self::COMMA(value) => value,
             Self::WHITESPACE(value) => value,
-            Self::ID(value) => value,
+            Self::NAME(value) => value,
         }
     }
 
@@ -126,11 +134,11 @@ impl Lexer {
     /// Basic usage:
     ///
     /// ```
-    /// let len = Lexer::ID("foo").len();
+    /// let len = Lexer::NAME("foo").len();
     /// assert_eq!(3, len);
     ///
-    /// assert_eq!(Lexer::ID("foo").len(), 4); // fancy f!
-    /// assert_eq!(Lexer::ID("foo").value().chars().count(), 3);
+    /// assert_eq!(Lexer::NAME("foo").len(), 4); // fancy f!
+    /// assert_eq!(Lexer::NAME("foo").value().chars().count(), 3);
     /// ```
     pub fn len(&self) -> usize {
         self.value().len()
@@ -140,10 +148,11 @@ impl Lexer {
         match self {
             Self::SELECT(_) => Self::SELECT(new_value),
             Self::FROM(_) => Self::FROM(new_value),
+            Self::AS(_) => Self::AS(new_value),
             Self::STAR(_) => Self::STAR(new_value),
             Self::COMMA(_) => Self::COMMA(new_value),
             Self::WHITESPACE(_) => Self::WHITESPACE(new_value),
-            Self::ID(_) => Self::ID(new_value),
+            Self::NAME(_) => Self::NAME(new_value),
         }
     }
 
@@ -227,6 +236,8 @@ impl Lexer {
 
 #[cfg(test)]
 mod tests {
+    use rsdb::NamedEnum;
+
     use crate::sql::lexer::Lexer;
 
     #[test]
@@ -234,53 +245,69 @@ mod tests {
         // same value
         assert!(Lexer::SELECT(String::from("0844")).eq(&Lexer::SELECT(String::from("0844"))));
         assert!(Lexer::FROM(String::from("6d74")).eq(&Lexer::FROM(String::from("6d74"))));
+        assert!(Lexer::AS(String::from("a839")).eq(&Lexer::AS(String::from("a839"))));
         assert!(Lexer::STAR(String::from("b55c")).eq(&Lexer::STAR(String::from("b55c"))));
         assert!(Lexer::COMMA(String::from("fd3e")).eq(&Lexer::COMMA(String::from("fd3e"))));
         assert!(
             Lexer::WHITESPACE(String::from("1af1")).eq(&Lexer::WHITESPACE(String::from("1af1")))
         );
-        assert!(Lexer::ID(String::from("4ec4")).eq(&Lexer::ID(String::from("4ec4"))));
+        assert!(Lexer::NAME(String::from("4ec4")).eq(&Lexer::NAME(String::from("4ec4"))));
         // diff value & ignore values
         assert!(Lexer::SELECT(String::from("8ff6")).eq(&Lexer::SELECT(String::from("4acc"))));
         assert!(Lexer::FROM(String::from("ac16")).eq(&Lexer::FROM(String::from("0a6a"))));
+        assert!(Lexer::AS(String::from("2703")).eq(&Lexer::AS(String::from("2703"))));
         assert!(Lexer::STAR(String::from("0bad")).eq(&Lexer::STAR(String::from("327f"))));
         assert!(Lexer::COMMA(String::from("a4f0")).eq(&Lexer::COMMA(String::from("4cfe"))));
         assert!(
             Lexer::WHITESPACE(String::from("80e2")).eq(&Lexer::WHITESPACE(String::from("c2c5")))
         );
         // diff value & match values
-        assert!(!Lexer::ID(String::from("7133")).eq(&Lexer::ID(String::from("5d5e"))));
+        assert!(!Lexer::NAME(String::from("7133")).eq(&Lexer::NAME(String::from("5d5e"))));
+    }
+
+    #[test]
+    fn it_name() {
+        assert_eq!(Lexer::SELECT(String::new()).name(), "SELECT");
+        assert_eq!(Lexer::FROM(String::new()).name(), "FROM");
+        assert_eq!(Lexer::AS(String::new()).name(), "AS");
+        assert_eq!(Lexer::STAR(String::new()).name(), "STAR");
+        assert_eq!(Lexer::COMMA(String::new()).name(), "COMMA");
+        assert_eq!(Lexer::WHITESPACE(String::new()).name(), "WHITESPACE");
+        assert_eq!(Lexer::NAME(String::new()).name(), "NAME");
     }
 
     #[test]
     fn it_value() {
         assert_eq!(Lexer::SELECT(String::from("cc45")).value(), "cc45");
         assert_eq!(Lexer::FROM(String::from("d733")).value(), "d733");
+        assert_eq!(Lexer::AS(String::from("46c6")).value(), "46c6");
         assert_eq!(Lexer::STAR(String::from("debb")).value(), "debb");
         assert_eq!(Lexer::COMMA(String::from("41ce")).value(), "41ce");
         assert_eq!(Lexer::WHITESPACE(String::from("b734")).value(), "b734");
-        assert_eq!(Lexer::ID(String::from("ee4f")).value(), "ee4f");
+        assert_eq!(Lexer::NAME(String::from("ee4f")).value(), "ee4f");
     }
 
     #[test]
     fn it_len() {
         assert_eq!(Lexer::SELECT(String::from("ea8")).len(), 3);
         assert_eq!(Lexer::FROM(String::from("82861")).len(), 5);
+        assert_eq!(Lexer::AS(String::from("81ea4155")).len(), 8);
         assert_eq!(Lexer::STAR(String::from("0286")).len(), 4);
         assert_eq!(Lexer::COMMA(String::from("272")).len(), 3);
         assert_eq!(Lexer::WHITESPACE(String::from("eab84")).len(), 5);
-        assert_eq!(Lexer::ID(String::from("44")).len(), 2);
+        assert_eq!(Lexer::NAME(String::from("44")).len(), 2);
     }
 
     #[test]
     fn it_into_iter() {
-        assert_eq!(Lexer::into_iter().len(), 6);
+        assert_eq!(Lexer::into_iter().len(), 7);
         assert!(Lexer::into_iter().any(|lexer| matches!(lexer, Lexer::SELECT(_))));
         assert!(Lexer::into_iter().any(|lexer| matches!(lexer, Lexer::FROM(_))));
+        assert!(Lexer::into_iter().any(|lexer| matches!(lexer, Lexer::AS(_))));
         assert!(Lexer::into_iter().any(|lexer| matches!(lexer, Lexer::STAR(_))));
         assert!(Lexer::into_iter().any(|lexer| matches!(lexer, Lexer::COMMA(_))));
         assert!(Lexer::into_iter().any(|lexer| matches!(lexer, Lexer::WHITESPACE(_))));
-        assert!(Lexer::into_iter().any(|lexer| matches!(lexer, Lexer::ID(_))));
+        assert!(Lexer::into_iter().any(|lexer| matches!(lexer, Lexer::NAME(_))));
     }
 
     #[test]
@@ -303,6 +330,15 @@ mod tests {
             Lexer::FROM(String::new()).find("from"),
             Some(lexer) if matches!(&lexer, Lexer::FROM(value) if value == "from")
         ));
+        // Lexer::AS
+        assert!(matches!(
+            Lexer::AS(String::new()).find("AS"),
+            Some(lexer) if matches!(&lexer, Lexer::AS(value) if value == "AS")
+        ));
+        assert!(matches!(
+            Lexer::AS(String::new()).find("as"),
+            Some(lexer) if matches!(&lexer, Lexer::AS(value) if value == "as")
+        ));
         // Lexer::STAR
         assert!(matches!(
             Lexer::STAR(String::new()).find("*"),
@@ -318,65 +354,74 @@ mod tests {
             Lexer::WHITESPACE(String::new()).find(" \r\n\t"),
             Some(lexer) if matches!(&lexer, Lexer::WHITESPACE(value) if value == " \r\n\t")
         ));
-        // Lexer::ID
+        // Lexer::NAME
         assert!(matches!(
-            Lexer::ID(String::new()).find("aA1_"),
-            Some(lexer) if matches!(&lexer, Lexer::ID(value) if value == "aA1_")
+            Lexer::NAME(String::new()).find("aA1_"),
+            Some(lexer) if matches!(&lexer, Lexer::NAME(value) if value == "aA1_")
         ));
         assert!(matches!(
-            Lexer::ID(String::new()).find("Aa1_"),
-            Some(lexer) if matches!(&lexer, Lexer::ID(value) if value == "Aa1_")
+            Lexer::NAME(String::new()).find("Aa1_"),
+            Some(lexer) if matches!(&lexer, Lexer::NAME(value) if value == "Aa1_")
         ));
-        assert!(matches!(Lexer::ID(String::new()).find("_aA1"), None));
-        assert!(matches!(Lexer::ID(String::new()).find("1aA_"), None));
+        assert!(matches!(Lexer::NAME(String::new()).find("_aA1"), None));
+        assert!(matches!(Lexer::NAME(String::new()).find("1aA_"), None));
     }
 
     #[test]
     fn it_find_one() {
         // Lexer::SELECT
         assert!(matches!(
-            Lexer::find_one("SELECT * FROM table"),
+            Lexer::find_one("SELECT * FROM TABLE_1"),
             Some(lexer) if matches!(&lexer, Lexer::SELECT(value) if value == "SELECT")
         ));
         assert!(matches!(
-            Lexer::find_one("select * from table"),
+            Lexer::find_one("select * from table_1"),
             Some(lexer) if matches!(&lexer, Lexer::SELECT(value) if value == "select")
         ));
         // Lexer::FROM
         assert!(matches!(
-            Lexer::find_one("FROM table WHERE 1=1"),
+            Lexer::find_one("FROM TABLE_1 WHERE 1=1"),
             Some(lexer) if matches!(&lexer, Lexer::FROM(value) if value == "FROM")
         ));
         assert!(matches!(
-            Lexer::find_one("from table where 1=1"),
+            Lexer::find_one("from table_1 where 1=1"),
             Some(lexer) if matches!(&lexer, Lexer::FROM(value) if value == "from")
+        ));
+        // Lexer::AS
+        assert!(matches!(
+            Lexer::find_one("AS ALL_COLUMNS FROM TABLE_1"),
+            Some(lexer) if matches!(&lexer, Lexer::AS(value) if value == "AS")
+        ));
+        assert!(matches!(
+            Lexer::find_one("as all_columns from table_1"),
+            Some(lexer) if matches!(&lexer, Lexer::AS(value) if value == "as")
         ));
         // Lexer::STAR
         assert!(matches!(
-            Lexer::find_one("* from table"),
+            Lexer::find_one("* from table_1"),
             Some(lexer) if matches!(&lexer, Lexer::STAR(value) if value == "*")
         ));
         // Lexer::COMMA
         assert!(matches!(
-            Lexer::find_one(",* from table"),
+            Lexer::find_one(",* from table_1"),
             Some(lexer) if matches!(&lexer, Lexer::COMMA(value) if value == ",")
         ));
         // Lexer::WHITESPACE
         assert!(matches!(
-            Lexer::find_one(" \r\n\t* from table"),
+            Lexer::find_one(" \r\n\t* from table_1"),
             Some(lexer) if matches!(&lexer, Lexer::WHITESPACE(value) if value == " \r\n\t")
         ));
-        // Lexer::ID
+        // Lexer::NAME
         assert!(matches!(
-            Lexer::find_one("aA1_ from table"),
-            Some(lexer) if matches!(&lexer, Lexer::ID(value) if value == "aA1_")
+            Lexer::find_one("aA1_ from table_1"),
+            Some(lexer) if matches!(&lexer, Lexer::NAME(value) if value == "aA1_")
         ));
         assert!(matches!(
-            Lexer::find_one("Aa1_ from table"),
-            Some(lexer) if matches!(&lexer, Lexer::ID(value) if value == "Aa1_")
+            Lexer::find_one("Aa1_ from table_1"),
+            Some(lexer) if matches!(&lexer, Lexer::NAME(value) if value == "Aa1_")
         ));
-        assert!(matches!(Lexer::find_one("_aA1 from table"), None));
-        assert!(matches!(Lexer::find_one("1aA_ from table"), None));
+        assert!(matches!(Lexer::find_one("_aA1 from table_1"), None));
+        assert!(matches!(Lexer::find_one("1aA_ from table_1"), None));
     }
 
     #[test]
@@ -389,7 +434,7 @@ mod tests {
                 matches!(lexers.get(0), Some(lexer) if matches!(lexer, Lexer::SELECT(value) if value == "select")) &&
                 matches!(lexers.get(1), Some(lexer) if matches!(lexer, Lexer::STAR(value) if value == "*")) &&
                 matches!(lexers.get(2), Some(lexer) if matches!(lexer, Lexer::FROM(value) if value == "from")) &&
-                matches!(lexers.get(3), Some(lexer) if matches!(lexer, Lexer::ID(value) if value == "table_1"))
+                matches!(lexers.get(3), Some(lexer) if matches!(lexer, Lexer::NAME(value) if value == "table_1"))
         ));
         // upper case
         assert!(matches!(
@@ -399,7 +444,7 @@ mod tests {
                 matches!(lexers.get(0), Some(lexer) if matches!(lexer, Lexer::SELECT(value) if value == "SELECT")) &&
                 matches!(lexers.get(1), Some(lexer) if matches!(lexer, Lexer::STAR(value) if value == "*")) &&
                 matches!(lexers.get(2), Some(lexer) if matches!(lexer, Lexer::FROM(value) if value == "FROM")) &&
-                matches!(lexers.get(3), Some(lexer) if matches!(lexer, Lexer::ID(value) if value == "TABLE_1"))
+                matches!(lexers.get(3), Some(lexer) if matches!(lexer, Lexer::NAME(value) if value == "TABLE_1"))
         ));
         // err
         assert!(matches!(

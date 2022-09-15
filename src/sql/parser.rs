@@ -1,14 +1,6 @@
 use rsdb::Offset;
 
-use super::{err::SyntaxError, lexer::Lexer, stmt::Stmt};
-
-pub trait Named {
-    const NAME: &'static str;
-}
-
-pub trait NamedInstance {
-    fn name(&self) -> &'static str;
-}
+use super::{err::SyntaxError, lexer::Lexer, stmt::stmt::Stmt};
 
 pub trait LexerParser {
     fn parse(source: &Vec<Lexer>, offset: &mut Offset) -> Result<Self, SyntaxError>

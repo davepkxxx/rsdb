@@ -10,18 +10,11 @@ impl SyntaxError {
         }
     }
 
-    pub fn build_excpeted_err(excpeted: &str) -> Self {
+    pub fn new_excpeted(excpeted: &str) -> Self {
         Self::new(&format!("excpeted '{}'", excpeted))
     }
 
-    pub fn build_miss_err(name: &str) -> Self {
+    pub fn new_missing(name: &str) -> Self {
         Self::new(&format!("missing {}", name))
-    }
-
-    pub fn build_required_found_err(expected_name: &str, actual_name: &str) -> Self {
-        Self::new(&format!(
-            "{} required, but found {}",
-            expected_name, actual_name
-        ))
     }
 }
