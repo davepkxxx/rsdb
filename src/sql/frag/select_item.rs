@@ -1,13 +1,13 @@
-use rsdb::{Named, NamedEnum, Offset};
+use rsdb::{Named, NamedEnum};
 
 use crate::sql::{
     err::SyntaxError,
-    expr::{alias::AliasParser, name::NameExpr},
-    lexer::Lexer,
-    parser::LexerParser,
+    expr::name::NameExpr,
+    lexer::{lexer::Lexer, mat::LexerMatch},
+    parser::{LexerParser, SyntaxPattern},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SelectItem {
     NAME(NameExpr),
     STAR,
@@ -18,7 +18,7 @@ impl Named for SelectItem {
 }
 
 impl NamedEnum for SelectItem {
-    fn name(&self) -> &'_ str {
+    fn name(&self) -> &'static str {
         match self {
             Self::NAME(_) => NameExpr::NAMED,
             Self::STAR => "STAR",
@@ -27,28 +27,33 @@ impl NamedEnum for SelectItem {
 }
 
 impl LexerParser for SelectItem {
-    fn parse(source: &Vec<Lexer>, offset: &mut Offset) -> Result<Self, SyntaxError> {
-        match source.get(offset.value) {
+    fn parse(source: &SyntaxPattern, index: usize) -> Result<(Self, usize), SyntaxError> {
+        match source.items.get(index) {
             Some(lexer) => match lexer {
-                Lexer::NAME(_) => Ok(SelectItem::NAME(NameExpr::parse(source, offset).unwrap())),
-                Lexer::STAR(_) => {
-                    offset.increment(1);
-                    Ok(SelectItem::STAR)
-                }
-                _ => Err(SyntaxError::new_missing(SelectItem::NAMED)),
+                Lexer::NAME(_) => match NameExpr::parse(source, index) {
+                    Ok((expr, end_index)) => Ok((SelectItem::NAME(expr), end_index)),
+                    Err(err) => Err(err),
+                },
+                Lexer::STAR(_) => Ok((SelectItem::STAR, index + 1)),
+                _ => Err(SyntaxError::new_missing(lexer.value(), SelectItem::NAMED)),
             },
-            None => Err(SyntaxError::new_missing(SelectItem::NAMED)),
+            None => Err(SyntaxError::new_missing(
+                LexerMatch::new_eof(&source.text),
+                SelectItem::NAMED,
+            )),
         }
     }
 }
 
-impl AliasParser for SelectItem {}
-
 #[cfg(test)]
 mod tests {
-    use rsdb::{Named, NamedEnum, Offset};
+    use rsdb::{Named, NamedEnum};
 
-    use crate::sql::{expr::name::NameExpr, lexer::Lexer, parser::LexerParser};
+    use crate::sql::{
+        expr::name::NameExpr,
+        lexer::{lexer::Lexer, mat::LexerMatch},
+        parser::{LexerParser, SyntaxPattern},
+    };
 
     use super::SelectItem;
 
@@ -65,32 +70,34 @@ mod tests {
     #[test]
     fn it_parse() {
         // lexers is end
-        let mut lexers: Vec<Lexer> = vec![];
-        let mut offset = Offset::new(0);
-        assert!(
-            matches!(SelectItem::parse(&lexers, &mut offset), Err(err) if err.msg == "SyntaxError: missing select item")
-        );
-        assert_eq!(offset.value, 0);
+        let mut source = SyntaxPattern::new("", vec![]);
+        assert!(matches!(
+            SelectItem::parse(&source, 0),
+            Err(err) if err.cause == "missing select item"
+        ));
         // no from item in lexers
-        lexers = vec![Lexer::SELECT(String::from("SELECT"))];
-        offset.value = 0;
-        assert!(
-            matches!(SelectItem::parse(&lexers, &mut offset), Err(err) if err.msg == "SyntaxError: missing select item")
+        source = SyntaxPattern::new(
+            "SELECT",
+            vec![Lexer::SELECT(LexerMatch::new_full_match("SELECT"))],
         );
-        assert_eq!(offset.value, 0);
+        assert!(matches!(
+            SelectItem::parse(&source, 0),
+            Err(err) if err.cause == "missing select item"
+        ));
         // contain from item -> name expression
-        lexers = vec![Lexer::NAME(String::from("4dfa"))];
-        offset.value = 0;
-        assert!(
-            matches!(SelectItem::parse(&lexers, &mut offset), Ok(item) if matches!(&item, SelectItem::NAME(expr) if expr.value == "4dfa"))
+        source = SyntaxPattern::new(
+            "4dfa",
+            vec![Lexer::NAME(LexerMatch::new_full_match("4dfa"))],
         );
-        assert_eq!(offset.value, 1);
+        assert!(matches!(
+            SelectItem::parse(&source, 0),
+            Ok((item, index)) if matches!(&item, SelectItem::NAME(expr) if expr.value == "4dfa" && index == 1
+        )));
         // contain from item -> name expression
-        lexers = vec![Lexer::STAR(String::from("*"))];
-        offset.value = 0;
-        assert!(
-            matches!(SelectItem::parse(&lexers, &mut offset), Ok(item) if matches!(&item, SelectItem::STAR))
-        );
-        assert_eq!(offset.value, 1);
+        source = SyntaxPattern::new("*", vec![Lexer::STAR(LexerMatch::new_full_match("*"))]);
+        assert!(matches!(
+            SelectItem::parse(&source, 0),
+            Ok((item, index)) if matches!(item, SelectItem::STAR) && index == 1
+        ));
     }
 }

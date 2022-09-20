@@ -1,8 +1,12 @@
-use rsdb::{Named, Offset};
+use rsdb::Named;
 
-use crate::sql::{parser::LexerParser, lexer::Lexer, err::SyntaxError};
+use crate::sql::{
+    err::SyntaxError,
+    lexer::{lexer::Lexer, mat::LexerMatch},
+    parser::{LexerParser, SyntaxPattern},
+};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NameExpr {
     pub value: String,
 }
@@ -12,19 +16,19 @@ impl Named for NameExpr {
 }
 
 impl LexerParser for NameExpr {
-    fn parse(source: &Vec<Lexer>, offset: &mut Offset) -> Result<Self, SyntaxError>
+    fn parse(source: &SyntaxPattern, index: usize) -> Result<(Self, usize), SyntaxError>
     where
         Self: Sized,
     {
-        match source.get(offset.value) {
+        match source.items.get(index) {
             Some(lexer) => match lexer {
-                Lexer::NAME(value) => {
-                    offset.increment(1);
-                    Ok(NameExpr::new(value))
-                }
-                _ => Err(SyntaxError::new_missing(Self::NAMED)),
+                Lexer::NAME(value) => Ok((NameExpr::new(value.as_str()), index + 1)),
+                _ => Err(SyntaxError::new_missing(lexer.value(), Self::NAMED)),
             },
-            None => Err(SyntaxError::new_missing(Self::NAMED)),
+            None => Err(SyntaxError::new_missing(
+                LexerMatch::new_eof(&source.text),
+                Self::NAMED,
+            )),
         }
     }
 }
@@ -32,16 +36,19 @@ impl LexerParser for NameExpr {
 impl NameExpr {
     pub fn new(value: &str) -> Self {
         NameExpr {
-            value: String::from(value),
+            value: value.to_owned(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use rsdb::{Named, Offset};
+    use rsdb::Named;
 
-    use crate::sql::{lexer::Lexer, parser::LexerParser};
+    use crate::sql::{
+        lexer::{lexer::Lexer, mat::LexerMatch},
+        parser::{LexerParser, SyntaxPattern},
+    };
 
     use super::NameExpr;
 
@@ -58,16 +65,22 @@ mod tests {
     #[test]
     fn it_parse() {
         // lexers is end
-        let mut source: Vec<Lexer> = vec![];
-        let mut offset = Offset::new(0);
-        assert!(matches!(NameExpr::parse(&source, &mut offset), Err(err) if err.msg == "SyntaxError: missing name expression"));
+        let mut source = SyntaxPattern::new("", vec![]);
+        assert!(matches!(
+            NameExpr::parse(&source, 0),
+            Err(err) if err.cause == "missing name expression"
+        ));
         // current lexer is not a name expression
-        source = vec![Lexer::SELECT(String::from("SELECT"))];
-        offset.value = 0;
-        assert!(matches!(NameExpr::parse(&source, &mut offset), Err(err) if err.msg == "SyntaxError: missing name expression"));
+        source = SyntaxPattern::new("", vec![Lexer::SELECT(LexerMatch::new("SELECT", 0, 5))]);
+        assert!(matches!(
+            NameExpr::parse(&source, 0),
+            Err(err) if err.cause == "missing name expression"
+        ));
         // current lexer is not a name expression
-        source = vec![Lexer::NAME(String::from("8d06"))];
-        offset.value = 0;
-        assert!(matches!(NameExpr::parse(&source, &mut offset), Ok(expr) if expr.value == "8d06"));
+        source = SyntaxPattern::new("", vec![Lexer::NAME(LexerMatch::new("8d06", 0, 4))]);
+        assert!(matches!(
+            NameExpr::parse(&source, 0),
+            Ok((expr, index)) if expr.value == "8d06" && index == 1
+        ));
     }
 }

@@ -3,10 +3,22 @@ pub trait Named {
 }
 
 pub trait NamedEnum {
-    fn name(&self) -> &'_ str;
+    fn name(&self) -> &'static str;
 }
 
-#[derive(Debug, Clone, Copy)]
+pub trait Values {
+    fn values() -> Vec<Self> where Self: Sized;
+}
+
+pub trait Is<Rhs: ?Sized = Self> {
+    fn is(&self, other: &Rhs) -> bool;
+
+    fn is_not(&self, other: &Rhs) -> bool {
+        !self.is(other)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Offset {
     pub value: usize,
 }

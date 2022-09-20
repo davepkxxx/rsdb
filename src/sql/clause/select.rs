@@ -1,15 +1,16 @@
-use rsdb::{Named, Offset};
+use rsdb::Named;
 
 use crate::sql::{
     err::SyntaxError,
-    frag::{items::ItemsParser, select_items::SelectItems},
-    lexer::Lexer,
-    parser::LexerParser,
+    expr::{alias::AliasExpr, items::ItemsExpr},
+    frag::select_item::SelectItem,
+    lexer::{lexer::Lexer, mat::LexerMatch},
+    parser::{LexerParser, SyntaxPattern},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectClause {
-    pub items: SelectItems,
+    pub items: ItemsExpr<AliasExpr<SelectItem>>,
 }
 
 impl Named for SelectClause {
@@ -17,11 +18,27 @@ impl Named for SelectClause {
 }
 
 impl LexerParser for SelectClause {
-    fn parse(source: &Vec<Lexer>, mut offset: &mut Offset) -> Result<Self, SyntaxError> {
-        offset.value += 1;
-        match SelectItems::parse(source, offset) {
-            Ok(items) => Ok(SelectClause { items }),
-            Err(err) => Err(err),
+    fn parse(source: &SyntaxPattern, index: usize) -> Result<(Self, usize), SyntaxError> {
+        match source.items.get(index) {
+            Some(lexer) => match lexer {
+                Lexer::SELECT(_) => match ItemsExpr::parse(source, index + 1) {
+                    Ok((items, end_index)) => match items.min_len_check(source, index + 1, 1) {
+                        Some(err) => Err(err),
+                        None => Ok((
+                            SelectClause {
+                                items: items.clone(),
+                            },
+                            end_index,
+                        )),
+                    },
+                    Err(err) => Err(err),
+                },
+                _ => Err(SyntaxError::new_missing(lexer.value(), Self::NAMED)),
+            },
+            None => Err(SyntaxError::new_missing(
+                LexerMatch::new_eof(&source.text),
+                Self::NAMED,
+            )),
         }
     }
 }

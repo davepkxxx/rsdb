@@ -1,15 +1,16 @@
-use rsdb::{Named, Offset};
+use rsdb::Named;
 
 use crate::sql::{
     err::SyntaxError,
-    frag::{from_items::FromItems, items::ItemsParser},
-    lexer::Lexer,
-    parser::LexerParser,
+    expr::{alias::AliasExpr, items::ItemsExpr},
+    frag::from_item::FromItem,
+    lexer::{lexer::Lexer, mat::LexerMatch},
+    parser::{LexerParser, SyntaxPattern},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FromClause {
-    pub items: FromItems,
+    pub items: ItemsExpr<AliasExpr<FromItem>>,
 }
 
 impl Named for FromClause {
@@ -17,11 +18,19 @@ impl Named for FromClause {
 }
 
 impl LexerParser for FromClause {
-    fn parse(source: &Vec<Lexer>, offset: &mut Offset) -> Result<Self, SyntaxError> {
-        offset.value += 1;
-        match FromItems::parse(source, offset) {
-            Ok(items) => Ok(FromClause { items }),
-            Err(err) => Err(err),
+    fn parse(source: &SyntaxPattern, index: usize) -> Result<(Self, usize), SyntaxError> {
+        match source.items.get(index) {
+            Some(lexer) => match lexer {
+                Lexer::FROM(_) => match ItemsExpr::parse(source, index + 1) {
+                    Ok((items, end_index)) => Ok(((FromClause { items }), end_index)),
+                    Err(err) => Err(err),
+                },
+                _ => Err(SyntaxError::new_missing(lexer.value(), Self::NAMED)),
+            },
+            None => Err(SyntaxError::new_missing(
+                LexerMatch::new_eof(&source.text),
+                Self::NAMED,
+            )),
         }
     }
 }
